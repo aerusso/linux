@@ -1,0 +1,85 @@
+#!/bin/bash
+
+for opid in $(pgrep "$(basename "${0}")") ; do
+    [ $opid -eq $$ ] || kill $opid
+done 
+
+set -e
+found=0
+
+for dev in /dev/input/event* ; do
+    [ -r "${dev}" ] || continue
+    evemu-describe "${dev}" | grep -q -i '^N: Corsair Corsair Gaming Scimitar RGB Mouse$' || continue
+    found=1
+    break
+done
+
+if [ $found -eq 0 ]; then
+    echo "No appropriate device found."
+    exit 1
+fi
+
+evemu-record ${dev} | {
+
+# Skip over the description
+while read -r line ; do
+    [ "${line}" == "#      Waiting for events      #" ] && break
+done
+read -r line
+[ "${line}" == "################################" ] || exit 1
+
+# Parse each line
+while read -r ev_pref ev_time ev_type ev_code ev_val ev_comment ; do
+    # Only respond to EV_KEY events
+    [ "${ev_type}" = "0001" ] || continue
+    # Parse the hex value and subtract off BTN_TRIGGER_HAPPY
+    code="$(( 16#$ev_code ))"
+    let code=code-703
+    # If it is below zero, we aren't dealing with one of our softkeys
+    [ "$code" -lt 0 ] && continue
+    # Parse the value (key up/down)
+    value="$(( 10#$ev_val ))"
+
+    case "${code}" in
+        1) key="shift" ;;
+        2) key="ctrl" ;;
+        3) key="alt" ;;
+        5) key="Escape" ;;
+        6) key="Super" ;;
+
+        10)
+            # resize
+            eval "$(xdotool getactivewindow getwindowgeometry --shell)"
+            window_x=${X}
+            window_y=${Y}
+            eval "$(xdotool getmouselocation --shell)"
+            Xsize=$((X-window_x))
+            Ysize=$((Y-window_y))
+            [[ $Xsize -gt 0 ]] || continue
+            [[ $Ysize -gt 0 ]] || continue
+            xdotool getactivewindow windowsize $((X-window_x)) $((Y-window_y))
+
+            continue
+          ;;
+
+        12) 
+            # raise
+            eval "$(xdotool getmouselocation --shell)"
+            xdotool windowraise $WINDOW
+
+            continue
+          ;;
+        *)
+            continue
+          ;;
+    esac
+
+    case "${value}" in
+        0) xdotool keyup "${key}" ;;
+        1) xdotool keydown "${key}" ;;
+    esac
+
+done
+
+}
+
