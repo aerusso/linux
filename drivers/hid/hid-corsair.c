@@ -655,8 +655,8 @@ static int corsair_input_mapping(struct hid_device *dev,
 			if ((usage->hid & HID_USAGE) <= 3)
 				return 0;
 			// XXX: Gets udev to identify this as a mouse.
-			if ((usage->hid & HID_USAGE) == 16)
-				return 0;
+			//if ((usage->hid & HID_USAGE) == 16)
+			//	return 0;
 			// These events are not triggered,
 			return -1;
 		case HID_UP_CONSUMER:
