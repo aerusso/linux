@@ -606,27 +606,22 @@ static int corsair_event(struct hid_device *dev, struct hid_field *field,
 			 struct hid_usage *usage, __s32 value)
 {
 	struct corsair_drvdata *drvdata = hid_get_drvdata(dev);
-	int i;
+	int gkey,gkey_start;
 
-	// This product has 12 "softkeys" on the side, which are reported
-	// as up or down as a bitmask for usages 41 and 42.
-	// Here, we map those 12 values to BTN_TRIGGER_HAPPY and let
-	// userspace decide what to do.
 	// TODO: Is SCIMITAR_PRO_RGB handled differently?
 	if ((dev->product == USB_DEVICE_ID_CORSAIR_SCIMITAR_RGB) &&
-	    ((dev->claimed & HID_CLAIMED_INPUT) && field->hidinput)) {
-		if (usage->code == 41) {
-			for( i = 0 ; i < 8 ; i++ )
-				input_report_key(field->hidinput->input,
-						 BTN_TRIGGER_HAPPY+i, value & (1 << i) );
-			return 1;
-		} else if (usage->code == 42) {
-			for( i = 0 ; i < 4 ; i++ )
-				input_report_key(field->hidinput->input,
-						 BTN_TRIGGER_HAPPY+i+8, value & (1 << i) );
-			return 1;
+	    ((dev->claimed & HID_CLAIMED_INPUT) && field->hidinput) &&
+	    ((usage->hid & HID_USAGE_PAGE) == 0xFFC10000)) {
+		switch (usage->usage_index) {
+		case 1: gkey_start=0; break;
+		case 2: gkey_start=8; break;
+		default: return 0;
 		}
-	}
+		for( gkey = gkey_start ; gkey < gkey_start+8 ; gkey++ )
+			input_report_key(field->hidinput->input,
+					 BTN_TRIGGER_HAPPY+gkey, value & (1 << (gkey-gkey_start)) );
+		return 1;
+		}
 
 	if (!drvdata->k90)
 		return 0;
@@ -651,29 +646,36 @@ static int corsair_input_mapping(struct hid_device *dev,
 				 struct hid_usage *usage, unsigned long **bit,
 				 int *max)
 {
-	int gkey;
+	int gkey,gkey_start;
 
 	if (dev->product == USB_DEVICE_ID_CORSAIR_SCIMITAR_RGB) {
-//		if (usage->collection_index!=1)
-//			return -1;
-		// only remap buttons
-		if ((usage->hid & HID_USAGE_PAGE) != HID_UP_BUTTON)
-			return 0;
-		gkey = (usage->hid ^ HID_UP_BUTTON)-4;
-		// don't remap right/middle/left mouse buttons
-		// remapping 12+4=16 breaks dpi resolution
-		if ((gkey < 0) || (gkey==12))
-			return 0;
-		// don't map beyond BTN_TRIGGER_HAPPY
-		if (gkey > 33)
+		switch (usage->hid & HID_USAGE_PAGE) {
+		case HID_UP_BUTTON:
+			// Left, right, and middle buttons.
+			if ((usage->hid & HID_USAGE) <= 3)
+				return 0;
+			// XXX: Gets udev to identify this as a mouse.
+			if ((usage->hid & HID_USAGE) == 16)
+				return 0;
+			// These events are not triggered,
 			return -1;
-		// account for 16 being skipped
-		if (gkey > 12) {
-			gkey -= 1;
+		case HID_UP_CONSUMER:
+			return -1;
+		case 0xFFC10000:
+			switch (usage->usage_index) {
+			case 1: gkey_start=0; break;
+			case 2: gkey_start=7; break;
+			default: return -1;
+			}
+			hid_map_usage_clear(input, usage, bit, max,
+					    EV_KEY, BTN_TRIGGER_HAPPY+gkey_start);
+			for ( gkey=gkey_start+1 ; gkey<gkey_start+7; gkey++)
+				set_bit(BTN_TRIGGER_HAPPY+gkey,
+					input->input->keybit);
+			return 1;
+		case 0xFFC20000:
+			return -1;
 		}
-		hid_map_usage_clear(input, usage, bit, max, EV_KEY,
-				    BTN_TRIGGER_HAPPY+gkey);
-		return 1;
 	}
 
 	if ((usage->hid & HID_USAGE_PAGE) != HID_UP_KEYBOARD)
@@ -760,9 +762,7 @@ static __u8 *corsair_mouse_report_fixup(struct hid_device *hdev, __u8 *rdesc,
 
 	} else {
 		/*
-		 * Corsair Scimitar RGB gives two reports, one of which does not
-		 * produce any events. Discard this to make identification simpler
-		 * for userspace.
+		 * Discard the boot report descriptor for the Corsair Scimitar RGB.
 		 */
 		switch (hdev->product) {
 		case USB_DEVICE_ID_CORSAIR_SCIMITAR_RGB:
